@@ -48,7 +48,6 @@ class PokemonListViewController: UIViewController {
         // Do any additional setup after loading the view.
         pokemonsTableView.delegate = self
         pokemonsTableView.dataSource = self
-        pokemonsTableView.register(UINib.init(nibName: "PokemonTableViewCell", bundle: nil), forCellReuseIdentifier: cellIdentifier)
         tableActivityIndicator.startAnimating()
         loadingLabel.isHidden = false
         controller.fetchPokemons {
@@ -65,7 +64,7 @@ class PokemonListViewController: UIViewController {
         if segue.identifier == pokemonDetailSegueIdentifier,
             let destination = segue.destination as? PokemonDetailViewController,
             let pokemonIndex = pokemonsTableView.indexPathForSelectedRow?.row {
-            destination.pokemonName = controller.pokemons[pokemonIndex].name
+            destination.pokemon = controller.pokemons[pokemonIndex]
         }
     }
 }
