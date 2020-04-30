@@ -32,9 +32,7 @@ extension PokemonListViewController_Previews: UIViewControllerRepresentable {
 }
 
 class PokemonListViewController: UIViewController {
-    private let placeholder = UIImage(named: "Placeholder")!.pngData()!
     private let cellIdentifier = "PokemonCell"
-    private let circleImageName = ".circle"
     private let pokemonDetailSegueIdentifier = "PokemonDetailSegue"
     
     @IBOutlet private weak var tableActivityIndicator: UIActivityIndicatorView!
@@ -48,9 +46,10 @@ class PokemonListViewController: UIViewController {
         // Do any additional setup after loading the view.
         pokemonsTableView.delegate = self
         pokemonsTableView.dataSource = self
+        pokemonsTableView.prefetchDataSource = self
         tableActivityIndicator.startAnimating()
         loadingLabel.isHidden = false
-        controller.fetchPokemons {
+        controller.fetchPokemons { _ in
             DispatchQueue.main.async { [weak self] in
                 self?.loadingLabel.isHidden = true
                 self?.tableActivityIndicator.stopAnimating()
@@ -73,57 +72,58 @@ extension PokemonListViewController: UITableViewDelegate { }
 
 extension PokemonListViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return controller.pokemons.count
+        return controller.totalCount
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier,
                                                  for: indexPath) as! PokemonTableViewCell
-        cell.selectedBackgroundView = self.applySelectedColorToCell()
-        
-        let pokemon = controller.pokemons[indexPath.row]
-        
-        cell.pokemonTitleLabel?.text = pokemon.name.capitalized
-        cell.pokemonSubtitleLabel?.text = String(format: "#%03d", pokemon.id)
-        cell.pokemonImageView.image = UIImage(data: pokemon.image ?? placeholder)
-        
-        cell.typesView.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        cell.typesView = self.generateTypesViewForCell(cell, withTypes: pokemon.types)
-        
-        switch pokemon.downloadState {
-        case .failed:
-            cell.imageActivityIndicator.stopAnimating()
-            cell.pokemonTitleLabel?.text = "Failed to load"
-        case .new:
-            cell.imageActivityIndicator.startAnimating()
-            controller.startOperations(for: pokemon, at: indexPath) { [weak self] in
-                self?.pokemonsTableView.reloadRows(at: [indexPath], with: .fade)
+        if isLoadingCell(for: indexPath) {
+            cell.configure(with: .none)
+        } else {
+            let pokemon = controller.pokemons[indexPath.row]
+            cell.configure(with: pokemon)
+            if pokemon.downloadState == .new {
+                controller.startOperations(for: pokemon, at: indexPath) { [weak self] in
+                    self?.pokemonsTableView.reloadRows(at: [indexPath], with: .fade)
+                }
             }
-        case .downloaded:
-            cell.imageActivityIndicator.stopAnimating()
         }
+        
         return cell
-    }
-    
-    func generateTypesViewForCell(_ cell:PokemonTableViewCell, withTypes types:[Pokemon.PokemonType]) -> UIStackView? {
-        let stackView = cell.typesView
-        types.forEach { (pokemonType) in
-            let imageName = pokemonType.type.name.capitalized + circleImageName
-            let image = UIImage(named: imageName)
-            let imageView = UIImageView(image: image)
-            imageView.contentMode = .scaleAspectFit
-            stackView?.addArrangedSubview(imageView)
-        }
-        return stackView
-    }
-    
-    func applySelectedColorToCell() -> UIView {
-        let backgroundView = UIView()
-        backgroundView.backgroundColor = UIColor.init(red: 156.0/255.0,
-                                                      green: 210.0/255.0,
-                                                      blue: 239.0/255.0,
-                                                      alpha: 1.0)
-        return backgroundView
     }
 }
 
+extension PokemonListViewController: UITableViewDataSourcePrefetching {
+    func tableView(_ tableView: UITableView, prefetchRowsAt indexPaths: [IndexPath]) {
+        if indexPaths.contains(where: isLoadingCell) {
+            controller.fetchPokemons { (newIndexPathsToReload) in
+                guard let newIndexPathsToReload = newIndexPathsToReload else {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.loadingLabel.isHidden = true
+                        self?.tableActivityIndicator.stopAnimating()
+                        self?.pokemonsTableView.reloadData()
+                        
+                    }
+                    return
+                }
+                let indexPathsToReload = self.visibleIndexPathsToReload(intersecting: newIndexPathsToReload)
+                DispatchQueue.main.async { [weak self] in
+                    self?.pokemonsTableView.reloadRows(at: indexPathsToReload, with: .automatic)
+                }
+            }
+        }
+    }
+}
+
+private extension PokemonListViewController {
+    func isLoadingCell(for indexPath: IndexPath) -> Bool {
+        return indexPath.row >= controller.pokemons.count
+    }
+    
+    func visibleIndexPathsToReload(intersecting indexPaths: [IndexPath]) -> [IndexPath] {
+        let indexPathsForVisibleRows = pokemonsTableView.indexPathsForVisibleRows ?? []
+        let indexPathsIntersection = Set(indexPathsForVisibleRows).intersection(indexPaths)
+        return Array(indexPathsIntersection)
+    }
+}

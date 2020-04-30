@@ -9,12 +9,12 @@
 import Foundation
 
 protocol APILoader {
-    func getMyPokemons(_ handler: @escaping (Result<[Pokemon], Error>) -> Void)
+    func getMyPokemons(with page: Int, handler: @escaping (Result<PagedCompletePokemons, Error>) -> Void)
 }
 
 struct MockDataLoader: APILoader {
     
-    func getMyPokemons(_ handler: @escaping (Result<[Pokemon], Error>) -> Void) {
+    func getMyPokemons(with page: Int, handler: @escaping (Result<PagedCompletePokemons, Error>) -> Void) {
         let pokemons: [Pokemon] = [
         .init(id: 1, name: "bulbasaur"),
         .init(id: 2, name: "ivasaur"),
@@ -22,13 +22,16 @@ struct MockDataLoader: APILoader {
         .init(id: 4, name: "charmander"),
         .init(id: 5, name: "charmeleon")
         ]
-        handler(.success(pokemons))
+        let completePokemon = PagedCompletePokemons(count: 5, next: nil, previous: nil, results: pokemons)
+        handler(.success(completePokemon))
     }
 }
 
 class DataLoader: APILoader {
     
     let baseEndPoint = "https://pokeapi.co/api/v2/"
+    let limit = 20
+    let pokemonEndpoint = "pokemon"
     let defaultSession = URLSession(configuration: .default)
     var dataTask: URLSessionDataTask? = nil
     
@@ -49,12 +52,13 @@ class DataLoader: APILoader {
     
     /// Looad PagedPokemons form the internet using the baseEndPoint
     private func loadPagedPokemons(fromEndpoint: String,
-                           withLimit limit: Int,
-                           handler: @escaping (Result<PagedPokemons, Error>) -> Void) {
+                                   withPage page: Int,
+                                   handler: @escaping (Result<PagedPokemons, Error>) -> Void) {
         dataTask?.cancel()
         
         var urlComponents = URLComponents(string: baseEndPoint+fromEndpoint)
-        urlComponents?.query = "limit=\(limit)"
+        let offset = (page - 1) * limit
+        urlComponents?.query = "offset=\(offset)&"+"limit=\(limit)"
         
         guard let url = urlComponents?.url else { return }
         
@@ -132,7 +136,7 @@ class DataLoader: APILoader {
         }).resume()
     }
     
-    public func getPagedPokemons(_ handler: @escaping (Result<PagedPokemons, Error>) -> Void) {
+    public func getPagedPokemons(with page: Int, handler: @escaping (Result<PagedPokemons, Error>) -> Void) {
         // Loading from JSON File
 //        if let pagedPokemons = self.loadJSON(fileName: "pokemon") {
 //            handler(.success(pagedPokemons))
@@ -141,8 +145,8 @@ class DataLoader: APILoader {
 //        }
         
         // Loading from Pokeapi
-        self.loadPagedPokemons(fromEndpoint: "pokemon",
-                               withLimit: 50) { (result) in
+        self.loadPagedPokemons(fromEndpoint: pokemonEndpoint,
+                               withPage: page) { (result) in
                                 switch result {
                                 case .success(let pagedPokemons):
                                     handler(.success(pagedPokemons))
@@ -164,7 +168,7 @@ class DataLoader: APILoader {
 //        }
         
         // Loading from Pokeapi
-        self.loadPokemon(fromEndpoint: "pokemon",
+        self.loadPokemon(fromEndpoint: pokemonEndpoint,
                          withIdOrName: pokemonId) { (result) in
                             switch result {
                             case .success(let pokemon):
@@ -177,8 +181,8 @@ class DataLoader: APILoader {
         }
     }
     
-    public func getMyPokemons(_ handler: @escaping (Result<[Pokemon], Error>) -> Void) {
-        self.getPagedPokemons { (result) in
+    public func getMyPokemons(with page: Int, handler: @escaping (Result<PagedCompletePokemons, Error>) -> Void) {
+        self.getPagedPokemons(with: page) { (result) in
             switch result {
             case .success(let pagedPokemons):
                 
@@ -202,7 +206,12 @@ class DataLoader: APILoader {
                     }
                 }
                 group.notify(queue: .main) {
-                    handler(.success(pokemons.sorted(by: { $0.id < $1.id })))
+                    let sortedPokemons = pokemons.sorted(by: { $0.id < $1.id })
+                    let completePokemons = PagedCompletePokemons(count: pagedPokemons.count,
+                                                                 next: pagedPokemons.next,
+                                                                 previous: pagedPokemons.previous,
+                                                                 results: sortedPokemons)
+                    handler(.success(completePokemons))
                 }
                 break
             case .failure(let error):
